@@ -32,7 +32,8 @@ struct SessionJWT {
     password: String,
 }
 
-static AUTH_SECRET: &str = "ef3b28c9951edd3151d9abb14e8e2909b5fc535c986e7cb588b32b0d2082a9b9";
+static AUTH_SECRET: &str = "your_secret_key";
+static JWT_EXPIRATION_SECS: u64 = 3600;
 
 async fn get_data_string(result: mongodb::error::Result<Document>) -> Result<web::Json<Document>, String> {
     match result {
@@ -138,9 +139,8 @@ async fn login(info: web::Json<UserLogin>) -> impl Responder {
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
-        println!("{:?}", since_the_epoch);
 
-        let claims = SessionJWT { iat: since_the_epoch, exp: since_the_epoch+3600, email, password };
+        let claims = SessionJWT { iat: since_the_epoch, exp: since_the_epoch+JWT_EXPIRATION_SECS, email, password };
         let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(AUTH_SECRET.as_ref())).unwrap();
 
         HttpResponse::Ok().body(token)
