@@ -9,6 +9,7 @@ use std::pin::Pin;
 use std::future::Future;
 use std::boxed::Box;
 use futures_util::TryFutureExt;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize, Deserialize)]
 struct User {
@@ -17,8 +18,16 @@ struct User {
     email: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct UserLogin {
+    email: String,
+    password: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct SessionJWT {
+    iat: u64,
+    exp: u64,
     email: String,
     password: String,
 }
@@ -81,7 +90,7 @@ where
             return Box::pin(self.service.call(req).map_ok(|res| res.map_into_left_body()));
         }
 
-        let token_data = decode::<UserLogin>(&jwt, &DecodingKey::from_secret(AUTH_SECRET.as_ref()), &Validation::default());
+        let token_data = decode::<SessionJWT>(&jwt, &DecodingKey::from_secret(AUTH_SECRET.as_ref()), &Validation::default());
 
         if let Ok(_) = token_data {
             Box::pin(self.service.call(req).map_ok(|res| res.map_into_left_body()))
@@ -124,7 +133,14 @@ async fn login(info: web::Json<UserLogin>) -> impl Responder {
     let password = info.password.clone();
 
     if password == "secret" {
-        let claims = UserLogin { email, password };
+        let start = SystemTime::now();
+        let since_the_epoch = start
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs();
+        println!("{:?}", since_the_epoch);
+
+        let claims = SessionJWT { iat: since_the_epoch, exp: since_the_epoch+3600, email, password };
         let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(AUTH_SECRET.as_ref())).unwrap();
 
         HttpResponse::Ok().body(token)
