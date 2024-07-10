@@ -1,6 +1,4 @@
-use actix_web::{web, App, HttpServer, middleware::Logger};
-use actix_service::Service;
-use mongodb::{Client, options::ClientOptions};
+use actix_web::{App, HttpServer, middleware::Logger};
 use middleware::auth::Authenticator;
 
 mod config;

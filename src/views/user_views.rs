@@ -6,6 +6,7 @@ use futures_util::TryStreamExt;
 use jsonwebtoken::{encode, Header, EncodingKey};
 use std::time::{SystemTime, UNIX_EPOCH};
 use crate::config::{AUTH_SECRET, JWT_EXPIRATION_SECS};
+use crate::models::user::SessionJWT;
 
 pub async fn login(info: web::Json<UserLogin>) -> impl Responder {
     let email = info.email.clone();
