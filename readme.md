@@ -32,7 +32,7 @@ Note: Unnecessary use of -X or --request, POST is already inferred.
 eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3MjA2MjEyNTYsImV4cCI6MTcyMDYyNDg1NiwiZW1haWwiOiJKb2UgVXNlciIsInBhc3N3b3JkIjoic2VjcmV0In0.CLi9Jc34GUOMuHuK7KDN2BUI2-vX6KI4yfnIN6ngm0E
 ```
 
-The JWT bearer token can now be specified to the protected routes such as `/users` and `/users/new`.
+The JWT bearer token can now be specified to the protected routes such as `/users`.
 
 ```
 % curl -v -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3MjA2MjEyNTYsImV4cCI6MTcyMDYyNDg1NiwiZW1haWwiOiJKb2UgVXNlciIsInBhc3N3b3JkIjoic2VjcmV0In0.CLi9Jc34GUOMuHuK7KDN2BUI2-vX6KI4yfnIN6ngm0E" http://127.0.0.1:9000/users -X POST -d '{"firstname": "Joe", "lastname": "User", "email": "joe@example.org"}' -H "Content-Type: application/json" 
