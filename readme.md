@@ -1,6 +1,6 @@
 # Rust API Example
 
-This repo shows how to implement a RESTful API in Rust with **[Nickel.rs](http://nickel.rs/)** and the **[MongoDB Rust Driver](https://github.com/mongodb-labs/mongo-rust-driver-prototype)**.
+This repo shows how to implement a RESTful API in Rust with **[Actix Web](https://actix.rs/)** and the **[MongoDB Rust Driver](https://www.mongodb.com/docs/drivers/rust/current/)**.
 
 ## Important Snippets
 
@@ -13,51 +13,37 @@ The **GET** `/users` route searches MongoDB for all users and then returns a JSO
 
 ...
 
-fn get_data_string(result: MongoResult<Document>) -> Result<Json, String> {
+async fn get_data_string(result: mongodb::error::Result<Document>) -> Result<web::Json<Document>, String> {
     match result {
-        Ok(doc) => Ok(Bson::Document(doc).to_json()),
-        Err(e) => Err(format!("{}", e))
+        Ok(doc) => Ok(web::Json(doc)),
+        Err(e) => Err(format!("{}", e)),
     }
 }
 
-router.get("/users", middleware! { |request, response|
+async fn get_users() -> impl Responder {
+    let client_options = ClientOptions::parse("mongodb://localhost:27017").await.unwrap();
+    let client = Client::with_options(client_options).unwrap();
 
-    // Connect to the database
-    let client = Client::connect("localhost", 27017)
-      .ok().expect("Error establishing connection.");
+    let collection = client.database("rust-users").collection::<Document>("users");
+    let mut cursor = collection.find(None, None).await.unwrap();
 
-    // The users collection
-    let coll = client.db("rust-users").collection("users");
-
-    // Create cursor that finds all documents
-    let cursor = coll.find(None, None).unwrap();
-
-    // Opening for the JSON string to be returned
     let mut data_result = "{\"data\":[".to_owned();
 
-    for (i, result) in cursor.enumerate() {
-        match get_data_string(result) {
+    while let Some(result) = cursor.try_next().await.unwrap() {
+        match get_data_string(Ok(result)).await {
             Ok(data) => {
-                let string_data = if i == 0 { 
-                    format!("{}", data)
-                } else {
-                    format!("{},", data)
-                };
-
+                let string_data = format!("{},", data.into_inner());
                 data_result.push_str(&string_data);
-            },
-
-            Err(e) => return response.send(format!("{}", e))
+            }
+            Err(e) => return HttpResponse::InternalServerError().body(e),
         }
     }
 
-    // Close the JSON string
     data_result.push_str("]}");
-
-    // Send back the result
-    format!("{}", data_result)
-
-});
+    HttpResponse::Ok()
+        .content_type("application/json")
+        .body(data_result)
+}
 
 ...
 ```
@@ -69,42 +55,31 @@ The **POST** `/users/new` route takes JSON data and saves in the database. The d
 
 ...
 
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Serialize, Deserialize)]
 struct User {
     firstname: String,
     lastname: String,
-    email: String
+    email: String,
 }
 
 ...
 
-router.post("/users/new", middleware! { |request, response|
+async fn new_user(info: web::Json<User>) -> impl Responder {
+    let client_options = ClientOptions::parse("mongodb://localhost:27017").await.unwrap();
+    let client = Client::with_options(client_options).unwrap();
 
-    // Accept a JSON string that corresponds to the User struct
-    let user = request.json_as::<User>().unwrap();
+    let collection = client.database("rust-users").collection::<Document>("users");
+    let user = doc! {
+        "firstname": &info.firstname,
+        "lastname": &info.lastname,
+        "email": &info.email,
+    };
 
-    let firstname = user.firstname.to_string();
-    let lastname = user.lastname.to_string();
-    let email = user.email.to_string();
-
-    // Connect to the database
-    let client = Client::connect("localhost", 27017)
-        .ok().expect("Error establishing connection.");
-
-    // The users collection
-    let coll = client.db("rust-users").collection("users");
-
-    // Insert one user
-    match coll.insert_one(doc! { 
-        "firstname" => firstname,
-        "lastname" => lastname,
-        "email" => email 
-    }, None) {
-        Ok(_) => (StatusCode::Ok, "Item saved!"),
-        Err(e) => return response.send(format!("{}", e))
+    match collection.insert_one(user, None).await {
+        Ok(_) => HttpResponse::Ok().body("Item saved!"),
+        Err(e) => HttpResponse::InternalServerError().body(format!("{}", e)),
     }
-
-});
+}
 
 ...
 ```
@@ -116,29 +91,20 @@ The **DELETE** `/users/:user_id` takes an `objectid` as a parameter, decodes it 
 
 ...
 
-router.delete("/users/:user_id", middleware! { |request, response|
+async fn delete_user(req: HttpRequest) -> impl Responder {
+    let client_options = ClientOptions::parse("mongodb://localhost:27017").await.unwrap();
+    let client = Client::with_options(client_options).unwrap();
 
-    let client = Client::connect("localhost", 27017)
-        .ok().expect("Failed to initialize standalone client.");
+    let collection = client.database("rust-users").collection::<Document>("users");
+    let object_id = req.match_info().get("id").unwrap();
 
-    // The users collection
-    let coll = client.db("rust-users").collection("users");
+    let id = ObjectId::parse_str(object_id).unwrap();
 
-    // Get the user_id from the request params
-    let user_id = request.param("user_id").unwrap();
-
-    // Match the user id to an bson ObjectId
-    let id = match ObjectId::with_string(user_id) {
-        Ok(oid) => oid,
-        Err(e) => return response.send(format!("{}", e))
-    };
-
-    match coll.delete_one(doc! {"_id" => id}, None) {
-        Ok(_) => (StatusCode::Ok, "Item deleted!"),
-        Err(e) => return response.send(format!("{}", e))
+    match collection.delete_one(doc! {"_id": id}, None).await {
+        Ok(_) => HttpResponse::Ok().body("Item deleted!"),
+        Err(e) => HttpResponse::InternalServerError().body(format!("{}", e)),
     }
-
-});
+}
 
 ...
 ```
