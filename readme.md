@@ -2,6 +2,76 @@
 
 This repo shows how to implement a RESTful API in Rust with **[Actix Web](https://actix.rs/)** and the **[MongoDB Rust Driver](https://www.mongodb.com/docs/drivers/rust/current/)**.
 
+This REST API uses simple JWT authentication. Note that it does not actually integrate with Auth0!
+
+## Prerequisites
+
+You will need to have MongoDB installed and running on `localhost:27017`. If on macOS, for instance, follow MongoDB's [installation instructions](https://www.mongodb.com/docs/manual/tutorial/install-mongodb-on-os-x/).
+
+## Usage
+
+Issue a POST to the `/login` route to obtain a JWT bearer token.
+
+```
+% curl -v http://127.0.0.1:9000/login -X POST -d '{"email": "Joe User", "password": "secret"}' -H "Content-Type: application/json"
+Note: Unnecessary use of -X or --request, POST is already inferred.
+*   Trying 127.0.0.1:9000...
+* Connected to 127.0.0.1 (127.0.0.1) port 9000
+> POST /login HTTP/1.1
+> Host: 127.0.0.1:9000
+> User-Agent: curl/8.4.0
+> Accept: */*
+> Content-Type: application/json
+> Content-Length: 43
+>
+< HTTP/1.1 200 OK
+< content-length: 180
+< date: Wed, 10 Jul 2024 14:20:55 GMT
+<
+* Connection #0 to host 127.0.0.1 left intact
+eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3MjA2MjEyNTYsImV4cCI6MTcyMDYyNDg1NiwiZW1haWwiOiJKb2UgVXNlciIsInBhc3N3b3JkIjoic2VjcmV0In0.CLi9Jc34GUOMuHuK7KDN2BUI2-vX6KI4yfnIN6ngm0E
+```
+
+The JWT bearer token can now be specified to the protected routes such as `/users` and `/users/new`.
+
+```
+% curl -v -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3MjA2MjEyNTYsImV4cCI6MTcyMDYyNDg1NiwiZW1haWwiOiJKb2UgVXNlciIsInBhc3N3b3JkIjoic2VjcmV0In0.CLi9Jc34GUOMuHuK7KDN2BUI2-vX6KI4yfnIN6ngm0E" http://127.0.0.1:9000/users -X POST -d '{"firstname": "Joe", "lastname": "User", "email": "joe@example.org"}' -H "Content-Type: application/json" 
+Note: Unnecessary use of -X or --request, POST is already inferred.
+*   Trying 127.0.0.1:9000...
+* Connected to 127.0.0.1 (127.0.0.1) port 9000
+> POST /users HTTP/1.1
+> Host: 127.0.0.1:9000
+> User-Agent: curl/8.4.0
+> Accept: */*
+> Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3MjA2MjEyNTYsImV4cCI6MTcyMDYyNDg1NiwiZW1haWwiOiJKb2UgVXNlciIsInBhc3N3b3JkIjoic2VjcmV0In0.CLi9Jc34GUOMuHuK7KDN2BUI2-vX6KI4yfnIN6ngm0E
+> Content-Type: application/json
+> Content-Length: 68
+>
+< HTTP/1.1 200 OK
+< content-length: 11
+< date: Wed, 10 Jul 2024 14:23:07 GMT
+<
+* Connection #0 to host 127.0.0.1 left intact
+Item saved!
+
+% curl -v -H "Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3MjA2MjEyNTYsImV4cCI6MTcyMDYyNDg1NiwiZW1haWwiOiJKb2UgVXNlciIsInBhc3N3b3JkIjoic2VjcmV0In0.CLi9Jc34GUOMuHuK7KDN2BUI2-vX6KI4yfnIN6ngm0E" http://127.0.0.1:9000/users
+*   Trying 127.0.0.1:9000...
+* Connected to 127.0.0.1 (127.0.0.1) port 9000
+> GET /users HTTP/1.1
+> Host: 127.0.0.1:9000
+> User-Agent: curl/8.4.0
+> Accept: */*
+> Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpYXQiOjE3MjA2MjEyNTYsImV4cCI6MTcyMDYyNDg1NiwiZW1haWwiOiJKb2UgVXNlciIsInBhc3N3b3JkIjoic2VjcmV0In0.CLi9Jc34GUOMuHuK7KDN2BUI2-vX6KI4yfnIN6ngm0E
+>
+< HTTP/1.1 200 OK
+< content-length: 127
+< content-type: application/json
+< date: Wed, 10 Jul 2024 14:23:51 GMT
+<
+* Connection #0 to host 127.0.0.1 left intact
+{"data":[{ "_id": ObjectId("668e994c7eba267f28496f8a"), "firstname": "Joe", "lastname": "User", "email": "joe@example.org" },]}
+```
+
 ## Important Snippets
 
 The simple example has `GET`, `POST`, and `DELETE` routes in the `main` function.
@@ -48,7 +118,7 @@ async fn get_users() -> impl Responder {
 ...
 ```
 
-The **POST** `/users/new` route takes JSON data and saves in the database. The data conforms to the `User` struct.
+The **POST** `/users` route takes JSON data and saves in the database. The data conforms to the `User` struct.
 
 ```rust
 // src/main.rs
