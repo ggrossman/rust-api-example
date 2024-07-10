@@ -1,8 +1,15 @@
-use actix_web::{web, App, HttpServer, HttpRequest, HttpResponse, Responder, middleware::Logger};
+use actix_service::{Service, Transform};
+use actix_web::{dev::ServiceRequest, dev::ServiceResponse, web, App, Error, HttpServer, HttpRequest, HttpResponse, Responder, middleware::Logger, body::EitherBody};
+use futures_util::future::{ok, Ready};
+use futures_util::TryStreamExt;
 use mongodb::{Client, options::ClientOptions, bson::{doc, oid::ObjectId, Document}};
 use serde::{Deserialize, Serialize};
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
-use futures::StreamExt;
+use std::pin::Pin;
+use std::future::Future;
+use std::boxed::Box;
+use futures_util::TryFutureExt;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize, Deserialize)]
 struct User {
@@ -11,13 +18,22 @@ struct User {
     email: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct UserLogin {
     email: String,
     password: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct SessionJWT {
+    iat: u64,
+    exp: u64,
+    email: String,
+    password: String,
+}
+
 static AUTH_SECRET: &str = "your_secret_key";
+static JWT_EXPIRATION_SECS: u64 = 3600;
 
 async fn get_data_string(result: mongodb::error::Result<Document>) -> Result<web::Json<Document>, String> {
     match result {
@@ -26,39 +42,63 @@ async fn get_data_string(result: mongodb::error::Result<Document>) -> Result<web
     }
 }
 
-async fn authenticator(
-    req: HttpRequest,
-    srv: &dyn actix_service::Service<
-        HttpRequest,
-        Response = HttpResponse,
-        Error = actix_web::Error,
-        Future = impl std::future::Future<Output = Result<HttpResponse, actix_web::Error>>,
-    >,
-) -> impl Responder {
-    if req.method() == "OPTIONS" {
-        return srv.call(req).await;
+struct Authenticator;
+
+impl<S, B> Transform<S, ServiceRequest> for Authenticator
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type Transform = AuthenticatorMiddleware<S>;
+    type InitError = ();
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ok(AuthenticatorMiddleware { service })
     }
+}
 
-    if req.path() == "/login" {
-        return srv.call(req).await;
-    }
+struct AuthenticatorMiddleware<S> {
+    service: S,
+}
 
-    let auth_header = match req.headers().get("Authorization") {
-        Some(header) => header.to_str().unwrap_or(""),
-        None => "",
-    };
+impl<S, B> Service<ServiceRequest> for AuthenticatorMiddleware<S>
+where
+    S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+    B: 'static,
+{
+    type Response = ServiceResponse<EitherBody<B>>;
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>>>>;
 
-    let jwt = if auth_header.starts_with("Bearer ") {
-        &auth_header[7..]
-    } else {
-        ""
-    };
+    actix_service::forward_ready!(service);
 
-    let token_data = decode::<UserLogin>(&jwt, &DecodingKey::from_secret(AUTH_SECRET.as_ref()), &Validation::default());
+    fn call(&self, req: ServiceRequest) -> Self::Future {
+        let auth_header = match req.headers().get("Authorization") {
+            Some(header) => header.to_str().unwrap_or(""),
+            None => "",
+        };
 
-    match token_data {
-        Ok(_) => srv.call(req).await,
-        Err(_) => Ok(HttpResponse::Forbidden().finish()),
+        let jwt = if auth_header.starts_with("Bearer ") {
+            &auth_header[7..]
+        } else {
+            ""
+        };
+
+        if req.method() == "OPTIONS" || req.path() == "/login" {
+            return Box::pin(self.service.call(req).map_ok(|res| res.map_into_left_body()));
+        }
+
+        let token_data = decode::<SessionJWT>(&jwt, &DecodingKey::from_secret(AUTH_SECRET.as_ref()), &Validation::default());
+
+        if let Ok(_) = token_data {
+            Box::pin(self.service.call(req).map_ok(|res| res.map_into_left_body()))
+        } else {
+            let res = req.into_response(HttpResponse::Forbidden().finish().map_into_right_body());
+            Box::pin(async { Ok(res) })
+        }
     }
 }
 
@@ -69,6 +109,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(|| {
         App::new()
             .wrap(Logger::default())
+            .wrap(Authenticator)
             .service(
                 web::resource("/login")
                     .route(web::post().to(login))
@@ -93,7 +134,13 @@ async fn login(info: web::Json<UserLogin>) -> impl Responder {
     let password = info.password.clone();
 
     if password == "secret" {
-        let claims = UserLogin { email, password };
+        let start = SystemTime::now();
+        let since_the_epoch = start
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs();
+
+        let claims = SessionJWT { iat: since_the_epoch, exp: since_the_epoch+JWT_EXPIRATION_SECS, email, password };
         let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(AUTH_SECRET.as_ref())).unwrap();
 
         HttpResponse::Ok().body(token)
@@ -111,8 +158,8 @@ async fn get_users() -> impl Responder {
 
     let mut data_result = "{\"data\":[".to_owned();
 
-    while let Some(result) = cursor.next().await {
-        match get_data_string(result).await {
+    while let Some(result) = cursor.try_next().await.unwrap() {
+        match get_data_string(Ok(result)).await {
             Ok(data) => {
                 let string_data = format!("{},", data.into_inner());
                 data_result.push_str(&string_data);
