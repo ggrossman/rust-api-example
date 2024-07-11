@@ -1,8 +1,9 @@
-use actix_web::{test, web, App, HttpMessage};
+use actix_web::{test, App};
 use mongodb::bson::{doc, Document};
-use my_app::models::user::{User, UserLogin};
-use my_app::controllers::user_controller::init;
-use my_app::utils::mongo::get_mongo_client;
+use rust_users::models::user::{User, UserLogin};
+use rust_users::controllers::user_controller::init;
+use rust_users::utils::mongo::get_mongo_client;
+use actix_web::http::header;
 
 async fn get_auth_token() -> String {
     let mut app = test::init_service(App::new().configure(init)).await;
@@ -75,7 +76,7 @@ async fn test_create_user() {
     let req = test::TestRequest::post()
         .uri("/users")
         .set_json(&user_info)
-        .header("Authorization", format!("Bearer {}", token))
+        .insert_header((header::AUTHORIZATION, format!("Bearer {}", token)))
         .to_request();
 
     let resp = test::call_service(&mut app, req).await;
@@ -90,7 +91,7 @@ async fn test_get_users() {
 
     let req = test::TestRequest::get()
         .uri("/users")
-        .header("Authorization", format!("Bearer {}", token))
+        .insert_header((header::AUTHORIZATION, format!("Bearer {}", token)))
         .to_request();
 
     let resp = test::call_service(&mut app, req).await;
@@ -121,7 +122,7 @@ async fn test_delete_user() {
 
     let req = test::TestRequest::delete()
         .uri(&format!("/users/{}", user_id))
-        .header("Authorization", format!("Bearer {}", token))
+        .insert_header((header::AUTHORIZATION, format!("Bearer {}", token)))
         .to_request();
 
     let resp = test::call_service(&mut app, req).await;

@@ -1,12 +1,6 @@
 use actix_web::{App, HttpServer, middleware::Logger};
-use middleware::auth::Authenticator;
-
-mod config;
-mod models;
-mod views;
-mod controllers;
-mod middleware;
-mod utils;
+use rust_users::middleware::auth::Authenticator;
+use rust_users::controllers;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
